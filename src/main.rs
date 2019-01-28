@@ -16,14 +16,90 @@ impl Pixel {
     }
 }
 
-fn render() {
+#[derive(Copy, Clone)]
+struct Point(f32, f32, f32);
+
+impl Point {
+    fn sub(&self, subtrahend: Point) -> Point {
+        Point(
+            self.0 - subtrahend.0,
+            self.1 - subtrahend.1,
+            self.2 - subtrahend.2
+            )
+    }
+
+    fn mult_sca(&self, scalar: f32) -> Point {
+        Point(
+            self.0 * scalar,
+            self.1 * scalar,
+            self.2 * scalar
+            )
+    }
+
+    fn mult(&self, other: Point) -> f32 {
+        (self.0 * other.0) + (self.1 * other.1) + (self.2 * other.2)
+    }
+
+    fn norm(&self) -> f32 {
+        (self.0 * self.0 + self.1 * self.1 + self.2 * self.2).sqrt()
+    }
+
+    fn normalize(&self) -> Point {
+        self.mult_sca(1.0 / self.norm())
+    }
+}
+
+struct Sphere {
+    center: Point,
+    radius: f32
+}
+
+impl Sphere {
+    fn ray_intersect(&self, orig: Point, dir: Point) -> bool {
+        //Nasty vector math
+        let L = self.center.sub(orig);
+        let tca = L.mult(dir);
+        let d2 = L.mult(L) - tca * tca;
+        if d2 > self.radius * self.radius  {
+            return false;
+        }
+        let thc = (self.radius * self.radius - d2).sqrt();
+        let mut t0 = tca - thc;
+        let t1 = tca + thc;
+        if t0 < 0.0 {
+            t0 = t1;
+        }
+        if t0 < 0.0 {
+            false
+        }else{
+            true
+        }
+    }
+}
+        
+fn cast_ray(origin: Point, dir: Point, sphere: &Sphere) -> Pixel {
+    if !sphere.ray_intersect(origin, dir) {
+        Pixel(0.2, 0.7, 0.8)
+    }else{
+        Pixel(0.4, 0.4, 0.3)
+    }
+}
+
+
+fn render(sphere: Sphere) {
     let width = 1024;
     let height = 768;
+    let fov = f32::consts::FRAC_PI_2;
+
     let mut framebuffer : Vec<Pixel> = Vec::new();
 
     for j in 0..height {
         for i in 0..width {
-            framebuffer.push(Pixel(j as f32 / (height as f32), i as f32 / (width as f32), 0.0))
+            let x = (2.0 * (i as f32 + 0.5) / (width as f32) - 1.0) * (fov / 2.0).tan() * width as f32 / (height as f32);
+            let y = -(2.0 * (j as f32 + 0.5) / (height as f32) - 1.0) * (fov / 2.0).tan();
+            let dir = Point(x, y, -1.0).normalize();
+            framebuffer.push(cast_ray(Point(0.0,0.0,0.0), dir, &sphere));
+
         }
     }
 
@@ -40,5 +116,6 @@ fn render() {
 
 
 fn main() {
-    render();
+    let sphere: Sphere = Sphere{center: Point(-3.0, 0.0, -16.0), radius: 2.0};
+    render(sphere);
 }
