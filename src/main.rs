@@ -14,6 +14,13 @@ impl Color {
             (255.0 * 0.0_f32.max(1.0_f32.min(self.2))) as u8
         ]
     }
+    fn mult_sca(&self, scalar: f32) -> Color {
+        Color(
+            self.0 * scalar,
+            self.1 * scalar,
+            self.2 * scalar
+            )
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -92,33 +99,52 @@ impl Sphere {
         (result, t0)
     }
 }
+
+struct Light {
+    position: Point,
+    intensity: f32,
+}
+
+impl Light {
+    fn new(p: Point, i: f32) -> Light {
+        Light{position: p, intensity: i}
+    }
+}
         
-fn scene_intersect(origin: &Point, dir: &Point, spheres: &Vec<Sphere>) -> (bool, Material) {
+fn scene_intersect(origin: &Point, dir: &Point, spheres: &Vec<Sphere>) -> (bool, Material, Point, Point) {
     let mut spheres_dist =f32::MAX;
+    let mut hit = Point(0.0, 0.0, 0.0);
+    let mut N = Point(0.0, 0.0, 0.0);
     let mut material = Material{diffuse_color: Color(0.0, 0.0, 0.0)};
     for sphere in spheres {
         let (intersect, dist) = sphere.ray_intersect(origin, dir);
         if intersect && dist < spheres_dist {
             spheres_dist = dist;
-            //let hit = origin.add(&dir.mult_sca(dist));
+            hit = origin.add(&dir.mult_sca(dist));
+            N = hit.sub(&sphere.center).normalize();
             material = sphere.material;
         }
     }
-    (spheres_dist < 1000.0, material)
+    (spheres_dist < 1000.0, material, hit, N)
 }
 
 
-fn cast_ray(origin: &Point, dir: &Point, spheres: &Vec<Sphere>) -> Color {
-    let (hit, material) = scene_intersect(origin, dir, spheres);
+fn cast_ray(origin: &Point, dir: &Point, spheres: &Vec<Sphere>, lights: &Vec<Light>) -> Color {
+    let (hit, material, point, N) = scene_intersect(origin, dir, spheres);
     if !hit {
         Color(0.2, 0.7, 0.8) //Backgorund color
     }else{
-        material.diffuse_color
+        let mut diffuse_light_intensity: f32 = 0.0;
+        for light in lights {
+            let light_dir: Point = light.position.sub(&point).normalize();
+            diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.mult(&N));
+        }
+        material.diffuse_color.mult_sca(diffuse_light_intensity)
     }
 }
 
 
-fn render(spheres: &Vec<Sphere>) {
+fn render(spheres: &Vec<Sphere>, lights: &Vec<Light>) {
     let width = 1024;
     let height = 768;
     let fov = f32::consts::FRAC_PI_2;
@@ -130,7 +156,7 @@ fn render(spheres: &Vec<Sphere>) {
             let x = (2.0 * (i as f32 + 0.5) / (width as f32) - 1.0) * (fov / 2.0).tan() * width as f32 / (height as f32);
             let y = -(2.0 * (j as f32 + 0.5) / (height as f32) - 1.0) * (fov / 2.0).tan();
             let dir = Point(x, y, -1.0).normalize();
-            framebuffer.push(cast_ray(&Point(0.0,0.0,0.0), &dir, &spheres));
+            framebuffer.push(cast_ray(&Point(0.0,0.0,0.0), &dir, &spheres, lights));
 
         }
     }
@@ -158,5 +184,9 @@ fn main() {
         Sphere{center: Point(7.0, 5.0, -18.0), radius: 2.0, material: ivory},
     ];
 
-    render(&spheres);
+    let lights = vec![
+        Light::new(Point(-20.0, 20.0, 20.0), 1.5),
+    ];
+
+    render(&spheres, &lights);
 }
