@@ -83,7 +83,7 @@ impl Point {
 }
 
 #[derive(Copy, Clone)]
-struct Albedo(f32, f32);
+struct Albedo(f32, f32, f32);
 
 #[derive(Copy, Clone)]
 struct Material {
@@ -134,14 +134,14 @@ impl Light {
     }
 }
         
-fn reflect(incedence: Point, norm: Point) -> Point {
+fn reflect(incedence: &Point, norm: &Point) -> Point {
     incedence.sub(&norm.mult_sca(2.0).mult_sca(incedence.mult(&norm)))
 }
 fn scene_intersect(origin: &Point, dir: &Point, spheres: &Vec<Sphere>) -> (bool, Material, Point, Point) {
     let mut spheres_dist =f32::MAX;
     let mut hit = Point(0.0, 0.0, 0.0);
     let mut N = Point(0.0, 0.0, 0.0);
-    let mut material = Material{diffuse_color: Color(0.0, 0.0, 0.0), albedo: Albedo(0.0, 0.0), specular_exponent: 0.0};
+    let mut material = Material{diffuse_color: Color(0.0, 0.0, 0.0), albedo: Albedo(0.0, 0.0, 0.0), specular_exponent: 0.0};
     for sphere in spheres {
         let (intersect, dist) = sphere.ray_intersect(origin, dir);
         if intersect && dist < spheres_dist {
@@ -155,19 +155,40 @@ fn scene_intersect(origin: &Point, dir: &Point, spheres: &Vec<Sphere>) -> (bool,
 }
 
 
-fn cast_ray(origin: &Point, dir: &Point, spheres: &Vec<Sphere>, lights: &Vec<Light>) -> Color {
+fn cast_ray(origin: &Point, dir: &Point, spheres: &Vec<Sphere>, lights: &Vec<Light>, depth: usize) -> Color {
     let (hit, material, point, N) = scene_intersect(origin, dir, spheres);
-    if !hit {
+    if !hit || depth > 4{
         Color(0.2, 0.7, 0.8) //Backgorund color
     }else{
+        let reflect_dir = reflect(dir, &N).normalize();
+        let reflect_origin = if reflect_dir.mult(&N) < 0.0 {
+            point.sub(&N.mult_sca(1.0e-3))
+        }else{
+            point.add(&N.mult_sca(1.0e-3))
+        };
+        let reflect_color = cast_ray(&reflect_origin, &reflect_dir, spheres, lights, depth + 1);
+
         let mut diffuse_light_intensity: f32 = 0.0;
         let mut specular_light_intensity: f32 = 0.0;
         for light in lights {
             let light_dir: Point = light.position.sub(&point).normalize();
+
+            let light_distance: f32 = light.position.sub(&point).norm();
+
+            let shadow_orig = if light_dir.mult(&N) < 0.0 {
+                point.sub(&N.mult_sca(1.0e-3))
+            }else{
+                point.add(&N.mult_sca(1.0e-3))
+            };
+
+            let (shadowed, _tmpmaterial, shadow_pt, _shadow_n) = scene_intersect(&shadow_orig, &light_dir, spheres);
+            if shadowed && shadow_pt.sub(&shadow_orig).norm() < light_distance {
+                continue;
+            }
             diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.mult(&N));
-            specular_light_intensity += f32::max(0.0_f32, -reflect(light_dir.mult_sca(-1.0), N).mult(dir)).powf(material.specular_exponent) * light.intensity;
+            specular_light_intensity += f32::max(0.0_f32, -reflect(&light_dir.mult_sca(-1.0), &N).mult(dir)).powf(material.specular_exponent) * light.intensity;
         }
-        material.diffuse_color.mult_sca(diffuse_light_intensity) .mult_sca(material.albedo.0).add(&Color(1.0, 1.0, 1.0).mult_sca(specular_light_intensity * material.albedo.1))
+        material.diffuse_color.mult_sca(diffuse_light_intensity).mult_sca(material.albedo.0).add(&Color(1.0, 1.0, 1.0).mult_sca(specular_light_intensity * material.albedo.1)).add(&reflect_color.mult_sca(material.albedo.2))
     }
 }
 
@@ -184,7 +205,7 @@ fn render(spheres: &Vec<Sphere>, lights: &Vec<Light>) {
             let x = (2.0 * (i as f32 + 0.5) / (width as f32) - 1.0) * (fov / 2.0).tan() * width as f32 / (height as f32);
             let y = -(2.0 * (j as f32 + 0.5) / (height as f32) - 1.0) * (fov / 2.0).tan();
             let dir = Point(x, y, -1.0).normalize();
-            framebuffer.push(cast_ray(&Point(0.0,0.0,0.0), &dir, &spheres, lights));
+            framebuffer.push(cast_ray(&Point(0.0,0.0,0.0), &dir, &spheres, lights, 0));
 
         }
     }
@@ -202,14 +223,15 @@ fn render(spheres: &Vec<Sphere>, lights: &Vec<Light>) {
 
 
 fn main() {
-    let ivory = Material{diffuse_color: Color(0.4, 0.4, 0.3), albedo: Albedo(0.6, 0.3), specular_exponent: 50.0};
-    let red_rubber = Material{diffuse_color: Color(0.3, 0.1, 0.1), albedo: Albedo(0.9, 0.1), specular_exponent: 10.0};
+    let ivory = Material{diffuse_color: Color(0.4, 0.4, 0.3), albedo: Albedo(0.6, 0.3, 0.1), specular_exponent: 50.0};
+    let red_rubber = Material{diffuse_color: Color(0.3, 0.1, 0.1), albedo: Albedo(0.9, 0.1, 0.0), specular_exponent: 10.0};
+    let mirror= Material{diffuse_color: Color(1.0, 1.0, 1.0), albedo: Albedo(0.0, 10.0, 0.8), specular_exponent: 1425.0};
 
     let spheres = vec![
         Sphere{center: Point(-3.0, 0.0, -16.0), radius: 2.0, material: ivory},
-        Sphere{center: Point(-1.0, -1.5, -12.0), radius: 2.0, material: red_rubber},
+        Sphere{center: Point(-1.0, -1.5, -12.0), radius: 2.0, material: mirror},
         Sphere{center: Point(1.5, -0.5, -18.0), radius: 3.0, material: red_rubber},
-        Sphere{center: Point(7.0, 5.0, -18.0), radius: 4.0, material: ivory},
+        Sphere{center: Point(7.0, 5.0, -18.0), radius: 4.0, material: mirror},
     ];
 
     let lights = vec![
