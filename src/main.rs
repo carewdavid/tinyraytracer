@@ -83,13 +83,14 @@ impl Point {
 }
 
 #[derive(Copy, Clone)]
-struct Albedo(f32, f32, f32);
+struct Albedo(f32, f32, f32, f32);
 
 #[derive(Copy, Clone)]
 struct Material {
     diffuse_color: Color,
     albedo: Albedo,
     specular_exponent: f32,
+    refractive_index: f32,
 }
 
 
@@ -137,11 +138,39 @@ impl Light {
 fn reflect(incedence: &Point, norm: &Point) -> Point {
     incedence.sub(&norm.mult_sca(2.0).mult_sca(incedence.mult(&norm)))
 }
+
+fn refract(incidence: &Point, norm: &Point, refractive_index: f32) -> Point {
+    let mut cosi = -f32::max(-1.0, f32::min(1.0, incidence.mult(norm)));
+
+    let mut etai: f32 = 1.0;
+    let mut etan: f32 = refractive_index;
+
+    let mut n: Point = norm.mult_sca(1.0);//Multiply by 1 to keep the borrow checker happy
+
+    if cosi < 0.0 {
+        cosi = -cosi;
+        n = norm.mult_sca(-1.0);
+
+        let temp = etai;
+        etai = etan;
+        etan = temp;
+    }
+
+    let eta = etai / etan;
+    let k = 1.0 - eta*eta*(1.0 - cosi*cosi);
+    if k < 0.0 {
+        Point(1.0, 0.0, 0.0)
+    }else{
+        incidence.mult_sca(eta).add(&n.mult_sca(eta * cosi - k.sqrt()))
+    }
+}
+                                    
+
 fn scene_intersect(origin: &Point, dir: &Point, spheres: &Vec<Sphere>) -> (bool, Material, Point, Point) {
     let mut spheres_dist =f32::MAX;
     let mut hit = Point(0.0, 0.0, 0.0);
     let mut N = Point(0.0, 0.0, 0.0);
-    let mut material = Material{diffuse_color: Color(0.0, 0.0, 0.0), albedo: Albedo(0.0, 0.0, 0.0), specular_exponent: 0.0};
+    let mut material = Material{diffuse_color: Color(0.0, 0.0, 0.0), albedo: Albedo(0.0, 0.0, 0.0, 0.0), specular_exponent: 0.0, refractive_index: 1.0};
     for sphere in spheres {
         let (intersect, dist) = sphere.ray_intersect(origin, dir);
         if intersect && dist < spheres_dist {
@@ -161,12 +190,19 @@ fn cast_ray(origin: &Point, dir: &Point, spheres: &Vec<Sphere>, lights: &Vec<Lig
         Color(0.2, 0.7, 0.8) //Backgorund color
     }else{
         let reflect_dir = reflect(dir, &N).normalize();
+        let refract_dir = refract(dir, &N, material.refractive_index).normalize();
         let reflect_origin = if reflect_dir.mult(&N) < 0.0 {
             point.sub(&N.mult_sca(1.0e-3))
         }else{
             point.add(&N.mult_sca(1.0e-3))
         };
+        let refract_origin = if refract_dir.mult(&N) < 0.0 {
+            point.sub(&N.mult_sca(1.0e-3))
+        }else{
+            point.add(&N.mult_sca(1.0e-3))
+        };
         let reflect_color = cast_ray(&reflect_origin, &reflect_dir, spheres, lights, depth + 1);
+        let refract_color = cast_ray(&refract_origin, &refract_dir, spheres, lights, depth + 1);
 
         let mut diffuse_light_intensity: f32 = 0.0;
         let mut specular_light_intensity: f32 = 0.0;
@@ -188,7 +224,7 @@ fn cast_ray(origin: &Point, dir: &Point, spheres: &Vec<Sphere>, lights: &Vec<Lig
             diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.mult(&N));
             specular_light_intensity += f32::max(0.0_f32, -reflect(&light_dir.mult_sca(-1.0), &N).mult(dir)).powf(material.specular_exponent) * light.intensity;
         }
-        material.diffuse_color.mult_sca(diffuse_light_intensity).mult_sca(material.albedo.0).add(&Color(1.0, 1.0, 1.0).mult_sca(specular_light_intensity * material.albedo.1)).add(&reflect_color.mult_sca(material.albedo.2))
+        material.diffuse_color.mult_sca(diffuse_light_intensity).mult_sca(material.albedo.0).add(&Color(1.0, 1.0, 1.0).mult_sca(specular_light_intensity * material.albedo.1)).add(&reflect_color.mult_sca(material.albedo.2)).add(&refract_color.mult_sca(material.albedo.3))
     }
 }
 
@@ -223,13 +259,14 @@ fn render(spheres: &Vec<Sphere>, lights: &Vec<Light>) {
 
 
 fn main() {
-    let ivory = Material{diffuse_color: Color(0.4, 0.4, 0.3), albedo: Albedo(0.6, 0.3, 0.1), specular_exponent: 50.0};
-    let red_rubber = Material{diffuse_color: Color(0.3, 0.1, 0.1), albedo: Albedo(0.9, 0.1, 0.0), specular_exponent: 10.0};
-    let mirror= Material{diffuse_color: Color(1.0, 1.0, 1.0), albedo: Albedo(0.0, 10.0, 0.8), specular_exponent: 1425.0};
+    let ivory = Material{diffuse_color: Color(0.4, 0.4, 0.3), albedo: Albedo(0.6, 0.3, 0.1, 0.0), specular_exponent: 50.0, refractive_index: 1.0};
+    let red_rubber = Material{diffuse_color: Color(0.3, 0.1, 0.1), albedo: Albedo(0.9, 0.1, 0.0, 0.0), specular_exponent: 10.0, refractive_index: 1.0};
+    let mirror= Material{diffuse_color: Color(1.0, 1.0, 1.0), albedo: Albedo(0.0, 10.0, 0.8, 0.0), specular_exponent: 1425.0, refractive_index: 1.0};
+    let glass= Material{diffuse_color: Color(1.0, 1.0, 1.0), albedo: Albedo(0.0, 0.5, 0.1, 0.8), specular_exponent: 125.0, refractive_index: 1.5};
 
     let spheres = vec![
         Sphere{center: Point(-3.0, 0.0, -16.0), radius: 2.0, material: ivory},
-        Sphere{center: Point(-1.0, -1.5, -12.0), radius: 2.0, material: mirror},
+        Sphere{center: Point(-1.0, -1.5, -12.0), radius: 2.0, material: glass},
         Sphere{center: Point(1.5, -0.5, -18.0), radius: 3.0, material: red_rubber},
         Sphere{center: Point(7.0, 5.0, -18.0), radius: 4.0, material: mirror},
     ];
