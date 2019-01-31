@@ -14,6 +14,24 @@ impl Color {
             (255.0 * 0.0_f32.max(1.0_f32.min(self.2))) as u8
         ]
     }
+
+    fn clamp(self) -> Color {
+        let max = f32::max(self.0, f32::max(self.1, self.2));
+        if max > 1.0 {
+            self.mult_sca(1.0 / max)
+        }else{
+            self
+        }
+    }
+
+    fn add(&self, addend: &Color) -> Color {
+        Color(
+            self.0 + addend.0,
+            self.1 + addend.1,
+            self.2 + addend.2
+            )
+    }
+
     fn mult_sca(&self, scalar: f32) -> Color {
         Color(
             self.0 * scalar,
@@ -52,7 +70,7 @@ impl Point {
     }
 
     fn mult(&self, other: &Point) -> f32 {
-        (self.0 * other.0) + (self.1 * other.1) + (self.2 * other.2)
+        ((self.0 * other.0) + (self.1 * other.1) + (self.2 * other.2))
     }
 
     fn norm(&self) -> f32 {
@@ -65,8 +83,13 @@ impl Point {
 }
 
 #[derive(Copy, Clone)]
+struct Albedo(f32, f32);
+
+#[derive(Copy, Clone)]
 struct Material {
-    diffuse_color: Color
+    diffuse_color: Color,
+    albedo: Albedo,
+    specular_exponent: f32,
 }
 
 
@@ -111,11 +134,14 @@ impl Light {
     }
 }
         
+fn reflect(incedence: Point, norm: Point) -> Point {
+    incedence.sub(&norm.mult_sca(2.0).mult_sca(incedence.mult(&norm)))
+}
 fn scene_intersect(origin: &Point, dir: &Point, spheres: &Vec<Sphere>) -> (bool, Material, Point, Point) {
     let mut spheres_dist =f32::MAX;
     let mut hit = Point(0.0, 0.0, 0.0);
     let mut N = Point(0.0, 0.0, 0.0);
-    let mut material = Material{diffuse_color: Color(0.0, 0.0, 0.0)};
+    let mut material = Material{diffuse_color: Color(0.0, 0.0, 0.0), albedo: Albedo(0.0, 0.0), specular_exponent: 0.0};
     for sphere in spheres {
         let (intersect, dist) = sphere.ray_intersect(origin, dir);
         if intersect && dist < spheres_dist {
@@ -135,11 +161,13 @@ fn cast_ray(origin: &Point, dir: &Point, spheres: &Vec<Sphere>, lights: &Vec<Lig
         Color(0.2, 0.7, 0.8) //Backgorund color
     }else{
         let mut diffuse_light_intensity: f32 = 0.0;
+        let mut specular_light_intensity: f32 = 0.0;
         for light in lights {
             let light_dir: Point = light.position.sub(&point).normalize();
             diffuse_light_intensity += light.intensity * f32::max(0.0, light_dir.mult(&N));
+            specular_light_intensity += f32::max(0.0_f32, -reflect(light_dir.mult_sca(-1.0), N).mult(dir)).powf(material.specular_exponent) * light.intensity;
         }
-        material.diffuse_color.mult_sca(diffuse_light_intensity)
+        material.diffuse_color.mult_sca(diffuse_light_intensity) .mult_sca(material.albedo.0).add(&Color(1.0, 1.0, 1.0).mult_sca(specular_light_intensity * material.albedo.1))
     }
 }
 
@@ -166,7 +194,7 @@ fn render(spheres: &Vec<Sphere>, lights: &Vec<Light>) {
     out.write_fmt(format_args!("P6\n{} {}\n255\n", width, height)).unwrap();
 
     for pixel in framebuffer.iter() {
-        out.write(&pixel.as_bytes()).unwrap();
+        out.write(&pixel.clamp().as_bytes()).unwrap();
     }
 }
 
@@ -174,18 +202,20 @@ fn render(spheres: &Vec<Sphere>, lights: &Vec<Light>) {
 
 
 fn main() {
-    let ivory = Material{diffuse_color: Color(0.4, 0.4, 0.3)};
-    let red_rubber = Material{diffuse_color: Color(0.3, 0.1, 0.1)};
+    let ivory = Material{diffuse_color: Color(0.4, 0.4, 0.3), albedo: Albedo(0.6, 0.3), specular_exponent: 50.0};
+    let red_rubber = Material{diffuse_color: Color(0.3, 0.1, 0.1), albedo: Albedo(0.9, 0.1), specular_exponent: 10.0};
 
     let spheres = vec![
         Sphere{center: Point(-3.0, 0.0, -16.0), radius: 2.0, material: ivory},
         Sphere{center: Point(-1.0, -1.5, -12.0), radius: 2.0, material: red_rubber},
-        Sphere{center: Point(1.5, -0.5, -18.0), radius: 2.0, material: red_rubber},
-        Sphere{center: Point(7.0, 5.0, -18.0), radius: 2.0, material: ivory},
+        Sphere{center: Point(1.5, -0.5, -18.0), radius: 3.0, material: red_rubber},
+        Sphere{center: Point(7.0, 5.0, -18.0), radius: 4.0, material: ivory},
     ];
 
     let lights = vec![
         Light::new(Point(-20.0, 20.0, 20.0), 1.5),
+        Light::new(Point(30.0, 50.0, -25.0), 1.8),
+        Light::new(Point(30.0, 20.0, 30.0), 1.7),
     ];
 
     render(&spheres, &lights);
